@@ -1,0 +1,7 @@
+[package]
+name = "edge_governance"
+version = "0.1.0"
+authors = ["drew"]
+edition = "2018"
+
+[dependencies]
