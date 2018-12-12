@@ -38,29 +38,33 @@ use system::ensure_signed;
 use runtime_support::{StorageValue, StorageMap, Parameter};
 use runtime_support::dispatch::Result;
 
-pub type ProposalIndex = u32;
-
-#[derive(Encode, Decode)]
-#[cfg_attr(feature = "std", derive(Serialize, PartialEq, Eq, Clone, Debug))]
+// TODO: stage transition functions
+#[cfg_attr(feature = "std", derive(Debug))]
+#[derive(Encode, Decode, PartialEq, Clone, Copy)]
 pub enum ProposalStage {
     PreVoting,
     Voting,
     Completed,
 }
-// TODO: stage transition functions
 
+// TODO: less static categories + way of interfacing w frontend
+#[cfg_attr(feature = "std", derive(Debug))]
+#[derive(Encode, Decode, PartialEq, Clone, Copy)]
 pub enum ProposalCategory {
     Referendum,
     Funding,
     NetworkChange,
 }
-// TODO: less static categories + way of interfacing w frontend
 
+#[cfg_attr(feature = "std", derive(Debug))]
+#[derive(Encode, Decode, PartialEq, Clone, Copy)]
 pub struct ProposalRecord<AccountId> {
+    pub index: u32,
+    pub author: AccountId,
     pub stage: ProposalStage,
     pub category: Proposal,
     pub contents: Vec<u8>,
-    pub comments: Vec<(Vec<u8>, AccountId)>
+    pub comments: Vec<(Vec<u8>, AccountId)>,
 }
 
 pub trait Trait: balances::Trait {
@@ -72,41 +76,60 @@ decl_module! {
     pub struct Module<T: Trait> for enum Call where origin: T::Origin {
         fn deposit_event() = default;
 
-        pub fn create_proposal(origin, proposal: Vec<u8>) -> Result {
+        pub fn create_proposal(origin, proposal: Vec<u8>, category: ProposalCategory) -> Result {
             let _sender = ensure_signed(origin)?;
-            let record = ProposalRecord { stage: ProposalStage::PreVoting,
-                                          category: ProposalCategory::Referendum, // TODO
+            let index = <ProposalCount<T>>::mutate(|i| *i += 1);
+            let hash = T::Hashing::Hash(&proposal);
+            let record = ProposalRecord { index: index,
+                                          author: _sender.clone(),
+                                          stage: ProposalStage::PreVoting,
+                                          category: category,
                                           contents: proposal,
                                           comments: vec![] };
-            <Proposals<T>>::insert(<ProposalCount<T>>::get(), record);
-            <ProposalCount<T>>::mutate(|i| *i += 1);
+            <ProposalOf<T>>::insert(&hash, record);
+            <Proposals<T>>::put(&hash);
+            Self::deposit_event(RawEvent::NewProposal(_sender, hash));
             Ok(())
         }
 
-        pub fn add_comment(origin, proposal_index: ProposalIndex, comment: Vec<u8>) -> Result {
+        // TODO: give comments unique numbers/ids?
+        pub fn add_comment(origin, proposal_hash: T::Hash, comment: Vec<u8>) -> Result {
             let _sender = ensure_signed(origin)?;
-            match <Proposals<T>>::get(proposal_index) {
-                None => Err("Proposal not found"),
-                Some(record) => {
-                    let mut new_record = record.clone();
-                    new_record.comments.push(comment);
-                    <Proposals<T>>::insert(proposal_index, new_record);
-                    Ok(())
-                }
+            // TODO: can we mut borrow somehow?
+            let record = <ProposalOf<T>>::get(&proposal_hash).ok_or("Proposal does not exist")?;
+            let mut new_record = record.clone();
+            new_record.comments.push((comment, _sender.clone()));
+            <ProposalOf<T>>::insert(&proposal_hash, new_record);
+            Self::deposit_event(RawEvent::NewComment(_sender, hash));
+            Ok(())
             }
         }
 
-        pub fn vote(origin, proposal_index: ProposalIndex, vote: bool) -> Result {
+        pub fn vote(origin, proposal_hash: T::Hash, vote: bool) -> Result {
+            // TODO: how do we know when ready for voting?
+            let _sender = ensure_signed(origin)?;
+            let record = <ProposalOf<T>>::get(&proposal_hash).ok_or("Proposal does not exist")?;
+            if record.stage != ProposalStage::Voting {
+                return Err("Proposal is not in voting stage");
+            }
+            // TODO: how do we handle....actually voting? With the Democracy module?
             unimplemented!();
         }
     }
 }
 
+decl_event!(
+    pub enum Event<T> where <T as system::Trait>::Hash,
+                            <T as system::Trait>::AccountId {
+        NewProposal(AccountId, Hash),
+        NewComment(AccountId, Hash)
+    }
+);
+
 decl_storage! {
     trait Store for Module<T: trait> as GovernanceStorage {
-        // TODO: change up these types for more extensibility and performance.
-        // TODO: add mappings from accounts to proposals.
-        pub Proposals get(proposals): map ProposalIndex => Vec<ProposalRecord>;
-        pub ProposalCount get(proposal_count): ProposalIndex;
+        pub ProposalCount get(proposal_count) : u32;
+        pub Proposals get(proposals): Vec<T::Hash>;
+        pub ProposalOf get(proposal_of): map T::Hash => Option<ProposalRecord<T::AccountId>>;
     }
 }

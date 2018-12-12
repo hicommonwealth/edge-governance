@@ -113,4 +113,40 @@ mod tests {
         // We use default for brevity, but you can configure as desired if needed.
         t.into();
     }
+
+    fn propose(who: u64, proposal: &[u8], category: super::ProposalCategory) -> super::Result {
+        Governance::create_proposal(Origin::signed(who), proposal.to_vec(), category);
+    }
+
+    fn comment(who: u64, proposal: H256, comment: &[u8]) -> super::Result {
+        Governance::add_comment(Origin::signed(who), proposal, comment.to_vec());
+    }
+
+    #[test]
+    fn propose_should_work() {
+        with_externalities(&mut new_test_ext(), || {
+            System::set_block_number(1);
+            let pair: Pair = Pair::from_seed(&hex!("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60"));
+            let public: H256 = pair.public().0.into();
+            let proposal: &[u8] = b"Make Edgeware Free";
+            let category: ProposalCategory = ProposalCategory::Referendum;
+            assert_ok!(propose(public, proposal, category));
+            assert_eq!(System::events(), vec![
+                EventRecord {
+                    phase: Phase::ApplyExtrinsic(0),
+                    event: Event::identity(RawEvent::NewProposal(H256::from(hash), 0 /*TODO: HOW TO GET HASH?*/))
+                }]
+            );
+        }
+    }
+
+    #[test]
+    fn comment_should_work() {
+
+    }
+
+    #[test]
+    fn comment_on_invalid_proposal_should_fail() {
+
+    }
 } 
