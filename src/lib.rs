@@ -110,8 +110,15 @@ mod tests {
         Governance::create_proposal(Origin::signed(who), proposal.to_vec(), category)
     }
 
-    fn comment(who: H256, proposal: H256, comment: &[u8]) -> super::Result {
-        Governance::add_comment(Origin::signed(who), proposal, comment.to_vec())
+    fn add_comment(who: H256, proposal_hash: H256, comment: &[u8]) -> super::Result {
+        Governance::add_comment(Origin::signed(who), proposal_hash, comment.to_vec())
+    }
+
+    fn build_proposal_hash(who: H256, proposal: &[u8]) -> H256 {
+            let mut buf = Vec::new();
+            buf.extend_from_slice(&who.encode());
+            buf.extend_from_slice(proposal.as_ref());
+            return Blake2Hasher::hash(&buf[..]);
     }
 
     #[test]
@@ -122,12 +129,7 @@ mod tests {
             let public: H256 = pair.public().0.into();
             let proposal: &[u8] = b"Make Edgeware Free";
             let category = governance::ProposalCategory::Referendum;
-            
-            // generate expected hash
-            let mut buf = Vec::new();
-            buf.extend_from_slice(&public.encode());
-            buf.extend_from_slice(&proposal.as_ref());
-            let hash = Blake2Hasher::hash(&buf[..]);
+            let hash = build_proposal_hash(public, &proposal);
             assert_ok!(propose(public, proposal, category));
             assert_eq!(System::events(), vec![
                 EventRecord {
@@ -139,12 +141,52 @@ mod tests {
     }
 
     #[test]
-    fn comment_should_work() {
+    fn propose_duplicate_should_fail() {
+        with_externalities(&mut new_test_ext(), || {
+            System::set_block_number(1);
+            let pair: Pair = Pair::from_seed(&hex!("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60"));
+            let public: H256 = pair.public().0.into();
+            let proposal: &[u8] = b"Make Edgeware Free";
+            let category = governance::ProposalCategory::Referendum;
+            let hash = build_proposal_hash(public, &proposal);
+            assert_ok!(propose(public, proposal, category));
+            assert_eq!(propose(public, proposal, category), Err("Proposal already exists"));
+        });
+    }
 
+    #[test]
+    fn comment_should_work() {
+        with_externalities(&mut new_test_ext(), || {
+            System::set_block_number(1);
+            let pair: Pair = Pair::from_seed(&hex!("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60"));
+            let public: H256 = pair.public().0.into();
+            let proposal: &[u8] = b"Make Edgeware Free";
+            let category = governance::ProposalCategory::Referendum;
+            assert_ok!(propose(public, proposal, category));
+            let hash = build_proposal_hash(public, &proposal);
+
+            // create a comment
+            let comment: &[u8] = b"pls do not do this";
+            assert_ok!(add_comment(public, hash, comment));
+            assert_eq!(System::events()[1], EventRecord {
+                phase: Phase::ApplyExtrinsic(0),
+                event: Event::governance(RawEvent::NewComment(public, hash))
+            });
+        });
     }
 
     #[test]
     fn comment_on_invalid_proposal_should_fail() {
+        with_externalities(&mut new_test_ext(), || {
+            System::set_block_number(1);
+            let pair: Pair = Pair::from_seed(&hex!("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60"));
+            let public: H256 = pair.public().0.into();
+
+            // create a comment and an invalid hash
+            let comment: &[u8] = b"pls do not do this";
+            let hash: H256 = public.clone();
+            assert_eq!(add_comment(public, hash, comment), Err("Proposal does not exist"));
+        });
 
     }
 } 
