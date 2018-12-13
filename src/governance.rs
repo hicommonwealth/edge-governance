@@ -29,14 +29,14 @@ extern crate sr_std as rstd;
 extern crate srml_support as runtime_support;
 extern crate sr_primitives as runtime_primitives;
 extern crate sr_io as runtime_io;
-
-extern crate srml_balances as balances;
 extern crate srml_system as system;
 
 use rstd::prelude::*;
 use system::ensure_signed;
 use runtime_support::{StorageValue, StorageMap, Parameter};
 use runtime_support::dispatch::Result;
+use runtime_primitives::traits::Hash;
+use codec::Encode;
 
 // TODO: stage transition functions
 #[cfg_attr(feature = "std", derive(Debug))]
@@ -57,17 +57,17 @@ pub enum ProposalCategory {
 }
 
 #[cfg_attr(feature = "std", derive(Debug))]
-#[derive(Encode, Decode, PartialEq, Clone, Copy)]
+#[derive(Encode, Decode, PartialEq)]
 pub struct ProposalRecord<AccountId> {
     pub index: u32,
     pub author: AccountId,
     pub stage: ProposalStage,
-    pub category: Proposal,
+    pub category: ProposalCategory,
     pub contents: Vec<u8>,
     pub comments: Vec<(Vec<u8>, AccountId)>,
 }
 
-pub trait Trait: balances::Trait {
+pub trait Trait: system::Trait {
     /// The overarching event type
     type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
 }
@@ -78,16 +78,29 @@ decl_module! {
 
         pub fn create_proposal(origin, proposal: Vec<u8>, category: ProposalCategory) -> Result {
             let _sender = ensure_signed(origin)?;
-            let index = <ProposalCount<T>>::mutate(|i| *i += 1);
-            let hash = T::Hashing::Hash(&proposal);
+
+            // cosntruct hash(origin + proposal) and check existence
+            let mut buf = Vec::new();
+            buf.extend_from_slice(&_sender.encode());
+            buf.extend_from_slice(&proposal.as_ref());
+            let hash = T::Hashing::hash(&buf[..]);
+            ensure!(<ProposalOf<T>>::get(&hash) == None, "Proposal already exists");
+
+            // construct proposal
+            let index = <ProposalCount<T>>::get();
+            <ProposalCount<T>>::mutate(|i| *i += 1);
             let record = ProposalRecord { index: index,
                                           author: _sender.clone(),
                                           stage: ProposalStage::PreVoting,
                                           category: category,
                                           contents: proposal,
                                           comments: vec![] };
+
+            // add new record to storage
             <ProposalOf<T>>::insert(&hash, record);
-            <Proposals<T>>::put(&hash);
+            let mut proposals = Self::proposals();
+            proposals.push(hash.clone());
+            <Proposals<T>>::put(proposals);
             Self::deposit_event(RawEvent::NewProposal(_sender, hash));
             Ok(())
         }
@@ -97,21 +110,18 @@ decl_module! {
             let _sender = ensure_signed(origin)?;
             // TODO: can we mut borrow somehow?
             let record = <ProposalOf<T>>::get(&proposal_hash).ok_or("Proposal does not exist")?;
-            let mut new_record = record.clone();
+            let mut new_record = record;
             new_record.comments.push((comment, _sender.clone()));
             <ProposalOf<T>>::insert(&proposal_hash, new_record);
-            Self::deposit_event(RawEvent::NewComment(_sender, hash));
+            Self::deposit_event(RawEvent::NewComment(_sender, proposal_hash));
             Ok(())
-            }
         }
 
         pub fn vote(origin, proposal_hash: T::Hash, vote: bool) -> Result {
             // TODO: how do we know when ready for voting?
             let _sender = ensure_signed(origin)?;
             let record = <ProposalOf<T>>::get(&proposal_hash).ok_or("Proposal does not exist")?;
-            if record.stage != ProposalStage::Voting {
-                return Err("Proposal is not in voting stage");
-            }
+            ensure!(record.stage == ProposalStage::Voting, "Proposal not in voting stage");
             // TODO: how do we handle....actually voting? With the Democracy module?
             unimplemented!();
         }
@@ -122,12 +132,12 @@ decl_event!(
     pub enum Event<T> where <T as system::Trait>::Hash,
                             <T as system::Trait>::AccountId {
         NewProposal(AccountId, Hash),
-        NewComment(AccountId, Hash)
+        NewComment(AccountId, Hash),
     }
 );
 
 decl_storage! {
-    trait Store for Module<T: trait> as GovernanceStorage {
+    trait Store for Module<T: Trait> as GovernanceStorage {
         pub ProposalCount get(proposal_count) : u32;
         pub Proposals get(proposals): Vec<T::Hash>;
         pub ProposalOf get(proposal_of): map T::Hash => Option<ProposalRecord<T::AccountId>>;

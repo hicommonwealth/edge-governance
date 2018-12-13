@@ -39,10 +39,9 @@ extern crate sr_std as rstd;
 extern crate srml_support as runtime_support;
 extern crate sr_primitives as runtime_primitives;
 extern crate sr_io as runtime_io;
-
-extern crate srml_balances as balances;
 extern crate srml_system as system;
 
+use codec::Encode;
 use rstd::prelude::*;
 use runtime_support::dispatch::Result;
 
@@ -53,12 +52,14 @@ pub use governance::{Module, Trait, RawEvent, Event};
 mod tests {
     use super::*;
     use system::{EventRecord, Phase};
-    use primitives::{H256, Blake2Hasher};
+    use runtime_io::with_externalities;
+    use runtime_io::ed25519::Pair;
+    use primitives::{H256, Blake2Hasher, Hasher};
     // The testing primitives are very useful for avoiding having to work with signatures
     // or public keys. `u64` is used as the `AccountId` and no `Signature`s are requried.
     use runtime_primitives::{
         BuildStorage, traits::{BlakeTwo256}, testing::{Digest, DigestItem, Header}
-    }
+    };
 
     impl_outer_origin! {
         pub enum Origin for Test {}
@@ -67,7 +68,6 @@ mod tests {
     impl_outer_event! {
         pub enum Event for Test {
             governance<T>,
-            balances<T>,
         }
     }
 
@@ -93,14 +93,6 @@ mod tests {
         type Log = DigestItem;
     }
 
-    impl balances::Trait for Test{
-        type Balance = u64;
-        type AccountIndex = u64;
-        type OnFreeBalanceZero = ();
-        type EnsureAccountLiquid = ();
-        type Event = Event;
-    }
-
     impl Trait for Test {
         type Event = Event;
     }
@@ -111,15 +103,15 @@ mod tests {
     fn new_test_ext() -> sr_io::TestExternalities<Blake2Hasher> {
         let t = system::GenesisConfig::<Test>::default().build_storage().unwrap().0;
         // We use default for brevity, but you can configure as desired if needed.
-        t.into();
+        t.into()
     }
 
-    fn propose(who: u64, proposal: &[u8], category: super::ProposalCategory) -> super::Result {
-        Governance::create_proposal(Origin::signed(who), proposal.to_vec(), category);
+    fn propose(who: H256, proposal: &[u8], category: governance::ProposalCategory) -> super::Result {
+        Governance::create_proposal(Origin::signed(who), proposal.to_vec(), category)
     }
 
-    fn comment(who: u64, proposal: H256, comment: &[u8]) -> super::Result {
-        Governance::add_comment(Origin::signed(who), proposal, comment.to_vec());
+    fn comment(who: H256, proposal: H256, comment: &[u8]) -> super::Result {
+        Governance::add_comment(Origin::signed(who), proposal, comment.to_vec())
     }
 
     #[test]
@@ -129,15 +121,21 @@ mod tests {
             let pair: Pair = Pair::from_seed(&hex!("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60"));
             let public: H256 = pair.public().0.into();
             let proposal: &[u8] = b"Make Edgeware Free";
-            let category: ProposalCategory = ProposalCategory::Referendum;
+            let category = governance::ProposalCategory::Referendum;
+            
+            // generate expected hash
+            let mut buf = Vec::new();
+            buf.extend_from_slice(&public.encode());
+            buf.extend_from_slice(&proposal.as_ref());
+            let hash = Blake2Hasher::hash(&buf[..]);
             assert_ok!(propose(public, proposal, category));
             assert_eq!(System::events(), vec![
                 EventRecord {
                     phase: Phase::ApplyExtrinsic(0),
-                    event: Event::identity(RawEvent::NewProposal(H256::from(hash), 0 /*TODO: HOW TO GET HASH?*/))
+                    event: Event::governance(RawEvent::NewProposal(public, hash))
                 }]
             );
-        }
+        });
     }
 
     #[test]
