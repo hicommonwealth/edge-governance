@@ -38,7 +38,6 @@ use runtime_support::dispatch::Result;
 use runtime_primitives::traits::Hash;
 use codec::Encode;
 
-// TODO: stage transition functions
 #[cfg_attr(feature = "std", derive(Debug))]
 #[derive(Encode, Decode, PartialEq, Clone, Copy)]
 pub enum ProposalStage {
@@ -47,13 +46,12 @@ pub enum ProposalStage {
     Completed,
 }
 
-// TODO: less static categories + way of interfacing w frontend
 #[cfg_attr(feature = "std", derive(Debug))]
 #[derive(Encode, Decode, PartialEq, Clone, Copy)]
 pub enum ProposalCategory {
-    Referendum,
-    Funding,
-    NetworkChange,
+    Signaling,
+    Funding(u32), // TODO: convert this into a Balance
+    Upgrade,
 }
 
 #[cfg_attr(feature = "std", derive(Debug))]
@@ -63,6 +61,7 @@ pub struct ProposalRecord<AccountId> {
     pub author: AccountId,
     pub stage: ProposalStage,
     pub category: ProposalCategory,
+    pub title: Vec<u8>,
     pub contents: Vec<u8>,
     pub comments: Vec<(Vec<u8>, AccountId)>,
 }
@@ -76,13 +75,16 @@ decl_module! {
     pub struct Module<T: Trait> for enum Call where origin: T::Origin {
         fn deposit_event() = default;
 
-        pub fn create_proposal(origin, proposal: Vec<u8>, category: ProposalCategory) -> Result {
+        pub fn create_proposal(origin, title: Vec<u8>, contents: Vec<u8>, category: ProposalCategory) -> Result {
             let _sender = ensure_signed(origin)?;
+            ensure!(!title.is_empty(), "Proposal must have title");
+            ensure!(!contents.is_empty(), "Proposal must not be empty");
 
-            // cosntruct hash(origin + proposal) and check existence
+            // construct hash(origin + proposal) and check existence
+            // TODO: include title/category/etc?
             let mut buf = Vec::new();
             buf.extend_from_slice(&_sender.encode());
-            buf.extend_from_slice(&proposal.as_ref());
+            buf.extend_from_slice(&contents.as_ref());
             let hash = T::Hashing::hash(&buf[..]);
             ensure!(<ProposalOf<T>>::get(&hash) == None, "Proposal already exists");
 
@@ -93,7 +95,8 @@ decl_module! {
                                           author: _sender.clone(),
                                           stage: ProposalStage::PreVoting,
                                           category: category,
-                                          contents: proposal,
+                                          title: title,
+                                          contents: contents,
                                           comments: vec![] };
 
             // add new record to storage
