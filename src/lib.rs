@@ -156,6 +156,21 @@ mod tests {
                     event: Event::governance(RawEvent::NewProposal(public, hash))
                 }]
             );
+
+            let title2: &[u8] = b"Proposal 2";
+            let proposal2: &[u8] = b"Proposal 2";
+            let hash2 = build_proposal_hash(public, &proposal2);
+            assert_ok!(propose(public, title2, proposal2, category));
+            assert_eq!(System::events(), vec![
+                EventRecord {
+                    phase: Phase::ApplyExtrinsic(0),
+                    event: Event::governance(RawEvent::NewProposal(public, hash))
+                },
+                EventRecord {
+                    phase: Phase::ApplyExtrinsic(0),
+                    event: Event::governance(RawEvent::NewProposal(public, hash2))
+                },]
+            );
         });
     }
 
