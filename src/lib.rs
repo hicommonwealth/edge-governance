@@ -114,6 +114,14 @@ mod tests {
         Governance::add_comment(Origin::signed(who), proposal_hash, comment.to_vec())
     }
 
+    fn advance_proposal(who: H256, proposal_hash: H256) -> super::Result {
+        Governance::advance_proposal(Origin::signed(who), proposal_hash)
+    }
+
+    fn submit_vote(who: H256, proposal_hash: H256, vote: bool) -> super::Result {
+        Governance::submit_vote(Origin::signed(who), proposal_hash, vote)
+    }
+
     fn build_proposal_hash(who: H256, proposal: &[u8]) -> H256 {
             let mut buf = Vec::new();
             buf.extend_from_slice(&who.encode());
@@ -221,6 +229,80 @@ mod tests {
             let hash: H256 = public.clone();
             assert_eq!(add_comment(public, hash, comment), Err("Proposal does not exist"));
         });
+    }
 
+    #[test]
+    fn advance_proposal_should_work_until_completed() {
+        with_externalities(&mut new_test_ext(), || {
+            System::set_block_number(1);
+            let public = get_test_key();
+            let category = governance::ProposalCategory::Funding(12);
+            let (title, proposal) = generate_proposal();
+            let hash = build_proposal_hash(public, &proposal);
+            assert_ok!(propose(public, title, proposal, category));
+            assert_ok!(advance_proposal(public, hash));
+            assert_ok!(advance_proposal(public, hash));
+            assert_eq!(advance_proposal(public, hash), Err("Proposal already completed"));
+            assert_eq!(System::events(), vec![
+                EventRecord {
+                    phase: Phase::ApplyExtrinsic(0),
+                    event: Event::governance(RawEvent::NewProposal(public, hash))
+                },
+                EventRecord {
+                    phase: Phase::ApplyExtrinsic(0),
+                    event: Event::governance(RawEvent::VotingStarted(hash))
+                },
+                EventRecord {
+                    phase: Phase::ApplyExtrinsic(0),
+                    event: Event::governance(RawEvent::VotingCompleted(hash))
+                },]
+            );
+        });
+    }
+
+    #[test]
+    fn non_author_advance_should_fail() {
+        with_externalities(&mut new_test_ext(), || {
+            System::set_block_number(1);
+            let public = get_test_key();
+            let category = governance::ProposalCategory::Funding(12);
+            let (title, proposal) = generate_proposal();
+            let hash = build_proposal_hash(public, &proposal);
+
+            let other_pair: Pair = Pair::from_seed(&hex!("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f61"));
+            let other_public: H256 = other_pair.public().0.into();
+            assert_ok!(propose(public, title, proposal, category));
+            assert_eq!(advance_proposal(other_public, hash), Err("Proposal must be advanced by author"));
+        });
+    }
+
+    #[test]
+    fn submit_vote_should_work() {
+        with_externalities(&mut new_test_ext(), || {
+            System::set_block_number(1);
+            let public = get_test_key();
+            let category = governance::ProposalCategory::Funding(12);
+            let (title, proposal) = generate_proposal();
+            let hash = build_proposal_hash(public, &proposal);
+            assert_ok!(propose(public, title, proposal, category));
+            assert_ok!(advance_proposal(public, hash));
+            assert_ok!(submit_vote(public, hash, true));
+        });
+    }
+
+    #[test]
+    fn submit_vote_at_wrong_stage_should_fail() {
+        with_externalities(&mut new_test_ext(), || {
+            System::set_block_number(1);
+            let public = get_test_key();
+            let category = governance::ProposalCategory::Funding(12);
+            let (title, proposal) = generate_proposal();
+            let hash = build_proposal_hash(public, &proposal);
+            assert_ok!(propose(public, title, proposal, category));
+            assert_eq!(submit_vote(public, hash, true), Err("Proposal not in voting stage"));
+            assert_ok!(advance_proposal(public, hash));
+            assert_ok!(advance_proposal(public, hash));
+            assert_eq!(submit_vote(public, hash, true), Err("Proposal not in voting stage"));
+        });
     }
 } 
