@@ -63,6 +63,7 @@ pub struct ProposalRecord<AccountId> {
     pub category: ProposalCategory,
     pub title: Vec<u8>,
     pub contents: Vec<u8>,
+    // TODO: separate comments into different object, for storage reasons
     pub comments: Vec<(Vec<u8>, AccountId)>,
 }
 
@@ -120,13 +121,40 @@ decl_module! {
             Ok(())
         }
 
-        pub fn vote(origin, proposal_hash: T::Hash, vote: bool) -> Result {
-            // TODO: how do we know when ready for voting?
+        pub fn advance_proposal(origin, proposal_hash: T::Hash) -> Result {
+            let _sender = ensure_signed(origin)?;
+            let record = <ProposalOf<T>>::get(&proposal_hash).ok_or("Proposal does not exist")?;
+
+            // only permit original author to advance
+            ensure!(record.author == _sender, "Proposal must be advanced by author");
+            let next_stage = match record.stage {
+                ProposalStage::PreVoting => ProposalStage::Voting,
+                ProposalStage::Voting    => ProposalStage::Completed,
+                ProposalStage::Completed => { return Err("Proposal already completed") },
+            };
+            let mut new_record = record;
+            new_record.stage = next_stage;
+            <ProposalOf<T>>::insert(&proposal_hash, new_record);
+            if next_stage == ProposalStage::Voting {
+                Self::deposit_event(RawEvent::VotingStarted(proposal_hash));
+            } else if next_stage == ProposalStage::Completed {
+                Self::deposit_event(RawEvent::VotingCompleted(proposal_hash));
+            }
+            Ok(())
+        }
+
+        pub fn submit_vote(origin, proposal_hash: T::Hash, vote: bool) -> Result {
             let _sender = ensure_signed(origin)?;
             let record = <ProposalOf<T>>::get(&proposal_hash).ok_or("Proposal does not exist")?;
             ensure!(record.stage == ProposalStage::Voting, "Proposal not in voting stage");
-            // TODO: how do we handle....actually voting? With the Democracy module?
-            unimplemented!();
+
+            // TODO: This does not allow updating one's vote; should we support this?
+            if Self::vote_of((proposal_hash, _sender.clone())).is_none() {
+                <ProposalVoters<T>>::mutate(proposal_hash, |voters| voters.push(_sender.clone()));
+            }
+            <VoteOf<T>>::insert((proposal_hash, _sender), vote);
+            // TODO: should we have an event? should it include the vote? or too noisy?
+            Ok(())
         }
     }
 }
@@ -136,6 +164,8 @@ decl_event!(
                             <T as system::Trait>::AccountId {
         NewProposal(AccountId, Hash),
         NewComment(AccountId, Hash),
+        VotingStarted(Hash),
+        VotingCompleted(Hash),
     }
 );
 
@@ -144,5 +174,7 @@ decl_storage! {
         pub ProposalCount get(proposal_count) : u32;
         pub Proposals get(proposals): Vec<T::Hash>;
         pub ProposalOf get(proposal_of): map T::Hash => Option<ProposalRecord<T::AccountId>>;
+        pub ProposalVoters get(proposal_voters): map T::Hash => Vec<T::AccountId>;
+        pub VoteOf get(vote_of): map (T::Hash, T::AccountId) => Option<bool>;
     }
 }
