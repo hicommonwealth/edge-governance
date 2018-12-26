@@ -1,5 +1,5 @@
 [package]
-name = "edge_governance"
+name = "edge-governance"
 version = "0.1.0"
 authors = ["Jake Naviasky <jake@commonwealth.im>, Drew Stone <drew@commonwealth.im>"]
 
