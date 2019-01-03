@@ -181,7 +181,6 @@ mod tests {
             let public = get_test_key();
             let (title, proposal) = generate_proposal();
             let category = governance::ProposalCategory::Signaling;
-            let hash = build_proposal_hash(public, &proposal);
             assert_ok!(propose(public, title, proposal, category));
             assert_eq!(propose(public, title, proposal, category), Err("Proposal already exists"));
         });
@@ -195,7 +194,6 @@ mod tests {
             let (title, _) = generate_proposal();
             let proposal = vec![];
             let category = governance::ProposalCategory::Upgrade;
-            let hash = build_proposal_hash(public, &proposal);
             assert_eq!(propose(public, title, &proposal, category), Err("Proposal must not be empty"));
         });
     }
@@ -208,7 +206,6 @@ mod tests {
             let (_, proposal) = generate_proposal();
             let title = vec![];
             let category = governance::ProposalCategory::Upgrade;
-            let hash = build_proposal_hash(public, &proposal);
             assert_eq!(propose(public, &title, proposal, category), Err("Proposal must have title"));
         });
     }
@@ -302,6 +299,20 @@ mod tests {
             assert_ok!(propose(public, title, proposal, category));
             assert_ok!(advance_proposal(public, hash));
             assert_ok!(submit_vote(public, hash, true));
+            assert_eq!(System::events(), vec![
+                EventRecord {
+                    phase: Phase::ApplyExtrinsic(0),
+                    event: Event::governance(RawEvent::NewProposal(public, hash))
+                },
+                EventRecord {
+                    phase: Phase::ApplyExtrinsic(0),
+                    event: Event::governance(RawEvent::VotingStarted(hash))
+                },
+                EventRecord {
+                    phase: Phase::ApplyExtrinsic(0),
+                    event: Event::governance(RawEvent::VoteSubmitted(hash, public, true))
+                },]
+            );
         });
     }
 

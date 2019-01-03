@@ -152,8 +152,8 @@ decl_module! {
             if Self::vote_of((proposal_hash, _sender.clone())).is_none() {
                 <ProposalVoters<T>>::mutate(proposal_hash, |voters| voters.push(_sender.clone()));
             }
-            <VoteOf<T>>::insert((proposal_hash, _sender), vote);
-            // TODO: should we have an event? should it include the vote? or too noisy?
+            <VoteOf<T>>::insert((proposal_hash.clone(), _sender.clone()), vote);
+            Self::deposit_event(RawEvent::VoteSubmitted(proposal_hash, _sender, vote));
             Ok(())
         }
     }
@@ -165,6 +165,7 @@ decl_event!(
         NewProposal(AccountId, Hash),
         NewComment(AccountId, Hash),
         VotingStarted(Hash),
+        VoteSubmitted(Hash, AccountId, bool),
         VotingCompleted(Hash),
     }
 );
