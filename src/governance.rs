@@ -171,7 +171,7 @@ decl_event!(
 );
 
 decl_storage! {
-    trait Store for Module<T: Trait> as GovernanceStorage {
+    trait Store for Module<T: Trait> as Governance {
         pub ProposalCount get(proposal_count) : u32;
         pub Proposals get(proposals): Vec<T::Hash>;
         pub ProposalOf get(proposal_of): map T::Hash => Option<ProposalRecord<T::AccountId>>;
